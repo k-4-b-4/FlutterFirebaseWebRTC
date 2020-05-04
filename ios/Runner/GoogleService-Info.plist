@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CLIENT_ID</key>
+	<string>532976626746-sfphf7d5c6fd7emr3oeopt4jhhfhl0hp.apps.googleusercontent.com</string>
+	<key>REVERSED_CLIENT_ID</key>
+	<string>com.googleusercontent.apps.532976626746-sfphf7d5c6fd7emr3oeopt4jhhfhl0hp</string>
+	<key>API_KEY</key>
+	<string>AIzaSyBRmatVYVkOVxwCA24Rkg_pYeEbbZfXaMI</string>
+	<key>GCM_SENDER_ID</key>
+	<string>532976626746</string>
+	<key>PLIST_VERSION</key>
+	<string>1</string>
+	<key>BUNDLE_ID</key>
+	<string>com.example.flutterFirebaseWebrtc</string>
+	<key>PROJECT_ID</key>
+	<string>webrtc-testing-8725f</string>
+	<key>STORAGE_BUCKET</key>
+	<string>webrtc-testing-8725f.appspot.com</string>
+	<key>IS_ADS_ENABLED</key>
+	<false></false>
+	<key>IS_ANALYTICS_ENABLED</key>
+	<false></false>
+	<key>IS_APPINVITE_ENABLED</key>
+	<true></true>
+	<key>IS_GCM_ENABLED</key>
+	<true></true>
+	<key>IS_SIGNIN_ENABLED</key>
+	<true></true>
+	<key>GOOGLE_APP_ID</key>
+	<string>1:532976626746:ios:f0ec220be7e40103e91903</string>
+	<key>DATABASE_URL</key>
+	<string>https://webrtc-testing-8725f.firebaseio.com</string>
+</dict>
+</plist>
