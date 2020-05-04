@@ -30,8 +30,7 @@ class MyHomePage extends StatefulWidget {
 
 class _MyHomePageState extends State<MyHomePage> {
   Map<String, RTCPeerConnection> _peerConnections = {};
-  RTCPeerConnection _offeredConnection = null;
-  RTCDataChannel _dataChannel = null; // TODO: 複数持つ
+  Map<String, RTCDataChannel> _dataChannels = {};
   Map<String, List<RTCIceCandidate>> preparedCandidates = {};
   String displayString = '';
   String roomWords = '';
@@ -39,8 +38,12 @@ class _MyHomePageState extends State<MyHomePage> {
   DateTime joinedAt = null;
 
   MediaStream _localStream;
+
   final _localRenderer = new RTCVideoRenderer();
   final _remoteRenderer = new RTCVideoRenderer();
+  bool _remoteUsed = false;
+  final _remoteRenderer2 = new RTCVideoRenderer();
+  bool _remote2Used = false;
   final roomWordsEditingController = TextEditingController();
 
   static final app = FirebaseApp.instance;
@@ -59,6 +62,7 @@ class _MyHomePageState extends State<MyHomePage> {
   initRenderers() async {
     await _localRenderer.initialize(); // 自分のインカメラ
     await _remoteRenderer.initialize(); // 相手のカメラ
+    await _remoteRenderer2.initialize();
   }
 
   setupMediaStream() async {
@@ -80,8 +84,10 @@ class _MyHomePageState extends State<MyHomePage> {
     _localRenderer.mirror = true;
   }
 
-
   joinRoom(String words) async {
+    setState(() {
+      roomWords = words;
+    });
     joinedAt = DateTime.now();
     await store
         .collection("rooms")
@@ -110,28 +116,58 @@ class _MyHomePageState extends State<MyHomePage> {
         .collection("rooms")
         .document(words)
         .collection("candidates")
+        .where("to", isEqualTo: this.uuid)
         .snapshots()
         .listen((data) async {
-          data.documentChanges
-              .where((change) => change.type == DocumentChangeType.added)
-              .forEach((dc) async {
-                print('ICECandidate情報が送られてきました');
-          final uid = dc.document.data['from']; // candidate対象のuuid
-          // updateDispalyString("applying candidate $uid");
-          final candidate = dc.document.data['candidate'];
-          final sdpMid = dc.document.data['sdpMid'];
-          final sdpMlineIndex = dc.document.data['sdpMLineIndex'];
-          final iceCandidate = RTCIceCandidate(candidate, sdpMid, sdpMlineIndex);
+      data.documentChanges
+          .where((change) => change.type == DocumentChangeType.added)
+          .forEach((dc) async {
+        print('ICECandidate情報が送られてきました');
+        final uid = dc.document.data['from']; // candidate対象のuuid
+        updateDispalyString("applying candidate $uid");
+        final candidate = dc.document.data['candidate'];
+        final sdpMid = dc.document.data['sdpMid'];
+        final sdpMlineIndex = dc.document.data['sdpMLineIndex'];
+        final iceCandidate = RTCIceCandidate(candidate, sdpMid, sdpMlineIndex);
 
-          if (_peerConnections[uid] != null) {
-            await _peerConnections[uid].addCandidate(iceCandidate);
-          } else {
-            if (preparedCandidates[uid] == null) {
-              preparedCandidates[uid] = [];
-            }
-            preparedCandidates[uid].add(iceCandidate);
+        if (_peerConnections[uid] != null) {
+          await _peerConnections[uid].addCandidate(iceCandidate);
+        } else {
+          if (preparedCandidates[uid] == null) {
+            preparedCandidates[uid] = [];
           }
-        });
+          preparedCandidates[uid].add(iceCandidate);
+        }
+      });
+
+
+    store
+        .collection("rooms")
+        .document(words)
+        .collection('offers_and_answers')
+        .where("type", isEqualTo: "answer")
+        .where("to", isEqualTo: this.uuid)
+        .snapshots()
+        .listen((data) async {
+      if (data.documentChanges.length == 0) {
+        return;
+      }
+
+      data.documentChanges.forEach((change) {
+        final uid = change.document.data['from'];
+        final sdp = change.document['sdp'];
+        final type = change.document['type'];
+
+        _peerConnections[uid]
+            .setRemoteDescription(new RTCSessionDescription(sdp, type));
+
+        if (preparedCandidates[uid] != null) {
+          preparedCandidates[uid].forEach((c) async {
+            await _peerConnections[uid].addCandidate(c);
+          });
+        }
+      });
+    });
     });
 
     store
@@ -152,9 +188,7 @@ class _MyHomePageState extends State<MyHomePage> {
             dc.document.data['sdp'], dc.document.data['type']);
         final connection = await createNewConnection();
 
-        connection.onAddStream = (stream) {
-          _remoteRenderer.srcObject = stream;
-        };
+        connection.onAddStream = applyRemoteStream;
 
         connection.onIceCandidate = (candidate) {
           connection.addCandidate(candidate);
@@ -162,18 +196,20 @@ class _MyHomePageState extends State<MyHomePage> {
               .collection("rooms")
               .document(words)
               .collection('candidates')
-              .add(
-                Map<String, dynamic>.from({
-                  ...{'from': this.uuid},
-                  ...candidate.toMap()
+              .add(Map<String, dynamic>.from({
+                ...{
+                  'from': this.uuid,
+                  'to': uid,
+                },
+                ...candidate.toMap()
               }));
         };
         connection.addStream(_localStream);
         connection.setRemoteDescription(offer);
         connection.onDataChannel = (channnel) {
-          _dataChannel = channnel;
-          _dataChannel.onMessage = (message) {
-            updateDispalyString(message.text);
+          _dataChannels[uid] = channnel;
+          _dataChannels[uid].onMessage = (message) {
+            updateDispalyString('$message.text from $uid');
           };
         };
 
@@ -203,6 +239,20 @@ class _MyHomePageState extends State<MyHomePage> {
     });
   }
 
+  applyRemoteStream(MediaStream stream) {
+    if (!_remoteUsed) {
+      _remoteRenderer.srcObject = stream;
+      setState(() {
+        _remoteUsed = true;
+      });
+    } else if (!_remote2Used) {
+      _remoteRenderer2.srcObject = stream;
+      setState(() {
+        _remote2Used = true;
+      });
+    }
+  }
+
   sendOffer(String uid, String roomWord) async {
     final connection = await createNewConnection();
     connection.onIceCandidate = (candidate) async {
@@ -212,18 +262,22 @@ class _MyHomePageState extends State<MyHomePage> {
           .document(roomWord)
           .collection('candidates')
           .add(Map<String, dynamic>.from({
-            ...{'from': this.uuid},
+            ...{
+              'from': this.uuid,
+              'to': uid,
+            },
             ...candidate.toMap()
           }));
     };
-    connection.onAddStream = (stream) {
-      _remoteRenderer.srcObject = stream;
-    };
+    connection.onAddStream = applyRemoteStream;
+
     connection.addStream(_localStream);
-    _dataChannel =
-        await connection.createDataChannel('chat', RTCDataChannelInit());
-    _dataChannel.onMessage = (message) {
-      updateDispalyString(message.text);
+    await connection.createDataChannel('chat', RTCDataChannelInit());
+    connection.onDataChannel = (channel) {
+      _dataChannels[uid] = channel;
+      _dataChannels[uid].onMessage = (message) {
+        updateDispalyString(message.text);
+      };
     };
 
     final offer = await connection.createOffer({});
@@ -259,42 +313,8 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   makeCall() async {
-    final store = new Firestore(app: app);
     final words = RandomWordGenerator.generate5Words();
-
-    setState(() {
-      roomWords = words;
-    });
-
     await joinRoom(words);
-
-    store
-        .collection("rooms")
-        .document(words)
-        .collection('offers_and_answers')
-        .where("type", isEqualTo: "answer")
-        .where("to", isEqualTo: this.uuid)
-        .snapshots()
-        .listen((data) async {
-      if (data.documentChanges.length == 0) {
-        return;
-      }
-
-      data.documentChanges.forEach((change) {
-        final uid = change.document.data['from'];
-        final sdp = change.document['sdp'];
-        final type = change.document['type'];
-
-        _peerConnections[uid]
-            .setRemoteDescription(new RTCSessionDescription(sdp, type));
-
-        if (preparedCandidates[uid] != null) {
-          preparedCandidates[uid].forEach((c) async {
-            await _peerConnections[uid].addCandidate(c);
-          });
-        }
-      });
-    });
   }
 
   Future<RTCPeerConnection> createNewConnection() async {
@@ -332,11 +352,12 @@ class _MyHomePageState extends State<MyHomePage> {
               Text('$displayString'),
               Expanded(child: RTCVideoView(_localRenderer)),
               Expanded(child: RTCVideoView(_remoteRenderer)),
+              Expanded(child: RTCVideoView(_remoteRenderer2)),
               TextField(
                 onChanged: (String newText) {
-                  if (_dataChannel != null) {
-                    _dataChannel.send(RTCDataChannelMessage(newText));
-                  }
+                  _dataChannels.values.forEach((c) {
+                    c.send(RTCDataChannelMessage(newText));
+                  });
                 },
               ),
               Row(
@@ -356,8 +377,9 @@ class _MyHomePageState extends State<MyHomePage> {
                                 FlatButton(
                                   child: Text("この部屋に入る"),
                                   onPressed: () async {
-                                    await joinRoom(roomWordsEditingController.text);
                                     Navigator.pop(context);
+                                    await joinRoom(
+                                        roomWordsEditingController.text);
                                   },
                                 ),
                                 FlatButton(
@@ -375,7 +397,9 @@ class _MyHomePageState extends State<MyHomePage> {
                     child: Text("部屋をつくる"),
                     onPressed: makeCall,
                   ),
-                  Text("$roomWords")
+                  Text(" 部屋鍵: $roomWords"),
+                  Text(" $_remoteUsed"),
+                  Text(" $_remote2Used"),
                 ],
               ),
             ],
