@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter_firebase_webrtc/app/utils/RandomWordGenerator.dart';
 import 'package:flutter_webrtc/webrtc.dart';
 import 'package:uuid/uuid.dart';
+import 'package:random_string/random_string.dart';
 
 void main() => runApp(MyApp());
 
@@ -29,22 +31,29 @@ class MyHomePage extends StatefulWidget {
 class _MyHomePageState extends State<MyHomePage> {
   Map<String, RTCPeerConnection> _peerConnections = {};
   RTCPeerConnection _offeredConnection = null;
-  RTCDataChannel _dataChannel = null;
+  RTCDataChannel _dataChannel = null; // TODO: 複数持つ
   Map<String, List<RTCIceCandidate>> preparedCandidates = {};
   String displayString = '';
+  String roomWords = '';
   String uuid = Uuid().v4();
+  DateTime joinedAt = null;
 
   MediaStream _localStream;
   final _localRenderer = new RTCVideoRenderer();
   final _remoteRenderer = new RTCVideoRenderer();
+  final roomWordsEditingController = TextEditingController();
 
-  final app = FirebaseApp.instance;
+  static final app = FirebaseApp.instance;
+  final _store = Firestore(app: app);
+  get store => _store;
+
+  get isInRoom => roomWords.isEmpty;
+
   @override
   initState() {
     super.initState();
     initRenderers();
-    setupStream();
-    connect();
+    setupMediaStream();
   }
 
   initRenderers() async {
@@ -52,7 +61,7 @@ class _MyHomePageState extends State<MyHomePage> {
     await _remoteRenderer.initialize(); // 相手のカメラ
   }
 
-  setupStream() async {
+  setupMediaStream() async {
     final Map<String, dynamic> mediaConstraints = {
       "audio": false,
       "video": {
@@ -71,95 +80,165 @@ class _MyHomePageState extends State<MyHomePage> {
     _localRenderer.mirror = true;
   }
 
-  connect() {
-    final store = Firestore(app: app);
+
+  joinRoom(String words) async {
+    joinedAt = DateTime.now();
+    await store
+        .collection("rooms")
+        .document(words)
+        .collection('users')
+        .add({'uid': uuid, 'joined': joinedAt.millisecondsSinceEpoch});
+
     store
         .collection("rooms")
-        .where("type", isEqualTo: "offer")
-        .where("to", isEqualTo: "") // 誰もマッチしていないOffer
+        .document(words)
+        .collection('users')
         .snapshots()
         .listen((data) async {
-      if (data.documentChanges
-              .where((change) => change.document.data['from'] != this.uuid)
-              .where((change) => change.type == DocumentChangeType.added)
-              .length >
-          0) {
-        updateDispalyString("createAnswer");
-
-        print('新しいオファーがありました');
-        data.documentChanges.forEach((dc) async {
-          final uid = dc.document.data['from'];
-          final offer = new RTCSessionDescription(
-              dc.document.data['sdp'], dc.document.data['type']);
-          final connection = await createNewConnection();
-
-          connection.onAddStream = (stream) {
-            _remoteRenderer.srcObject = stream;
-          };
-
-          connection.onIceCandidate = (candidate) {
-            connection.addCandidate(candidate);
-            store.collection('candidates').add({
-              ...{'from': this.uuid},
-              ...candidate.toMap()
-            });
-          };
-          connection.addStream(_localStream);
-          connection.setRemoteDescription(offer);
-          connection.onDataChannel = (channnel) {
-            _dataChannel = channnel;
-            _dataChannel.onMessage = (message) {
-              updateDispalyString(message.text);
-            };
-          };
-
-          final answer = await connection.createAnswer({});
-          connection.setLocalDescription(answer);
-
-          store.collection("rooms").add({
-            'type': answer.type,
-            'from': this.uuid,
-            'to': uid,
-            'sdp': answer.sdp
-          });
-          _peerConnections[uid] = connection;
-
-          if (preparedCandidates[uid] != null) {
-            preparedCandidates[uid].forEach((can) {
-              connection.addCandidate(can);
-            });
-            preparedCandidates[uid].clear();
-          }
-        });
-      }
+      data.documentChanges
+          .where((change) => change.document.data['uid'] != this.uuid)
+          .where((change) => change.type == DocumentChangeType.added)
+          .where((change) => DateTime.fromMillisecondsSinceEpoch(
+                  change.document.data['joined'])
+              .isAfter(joinedAt))
+          .forEach((dc) {
+        sendOffer(dc.document.data['uid'], words);
+      });
     });
 
-    store.collection("candidates").snapshots().listen((data) async {
-      final newCandidates = data.documentChanges
-          .where((change) => change.type == DocumentChangeType.added);
-      if (newCandidates.isEmpty) {
-        return;
-      }
+    store
+        .collection("rooms")
+        .document(words)
+        .collection("candidates")
+        .snapshots()
+        .listen((data) async {
+          data.documentChanges
+              .where((change) => change.type == DocumentChangeType.added)
+              .forEach((dc) async {
+                print('ICECandidate情報が送られてきました');
+          final uid = dc.document.data['from']; // candidate対象のuuid
+          // updateDispalyString("applying candidate $uid");
+          final candidate = dc.document.data['candidate'];
+          final sdpMid = dc.document.data['sdpMid'];
+          final sdpMlineIndex = dc.document.data['sdpMLineIndex'];
+          final iceCandidate = RTCIceCandidate(candidate, sdpMid, sdpMlineIndex);
 
-      // updateDispalyString("applying candidate");
-      print('ICECandidate情報が送られてきました');
-      newCandidates.forEach((dc) async {
-        final uid = dc.document.data['from']; // candidate対象のuuid
-        // updateDispalyString("applying candidate $uid");
-        final candidate = dc.document.data['candidate'];
-        final sdpMid = dc.document.data['sdpMid'];
-        final sdpMlineIndex = dc.document.data['sdpMLineIndex'];
-        final iceCandidate = RTCIceCandidate(candidate, sdpMid, sdpMlineIndex);
-
-        if (_peerConnections[uid] != null) {
-          await _peerConnections[uid].addCandidate(iceCandidate);
-        } else {
-          if (preparedCandidates[uid] == null) {
-            preparedCandidates[uid] = [];
+          if (_peerConnections[uid] != null) {
+            await _peerConnections[uid].addCandidate(iceCandidate);
+          } else {
+            if (preparedCandidates[uid] == null) {
+              preparedCandidates[uid] = [];
+            }
+            preparedCandidates[uid].add(iceCandidate);
           }
-          preparedCandidates[uid].add(iceCandidate);
+        });
+    });
+
+    store
+        .collection("rooms")
+        .document(words)
+        .collection("offers_and_answers")
+        .where("type", isEqualTo: "offer")
+        .where("to", isEqualTo: uuid)
+        .snapshots()
+        .listen((data) async {
+      data.documentChanges
+          .where((change) => change.document.data['from'] != this.uuid)
+          .where((change) => change.type == DocumentChangeType.added)
+          .forEach((dc) async {
+        print(dc);
+        final uid = dc.document.data['from'];
+        final offer = new RTCSessionDescription(
+            dc.document.data['sdp'], dc.document.data['type']);
+        final connection = await createNewConnection();
+
+        connection.onAddStream = (stream) {
+          _remoteRenderer.srcObject = stream;
+        };
+
+        connection.onIceCandidate = (candidate) {
+          connection.addCandidate(candidate);
+          store
+              .collection("rooms")
+              .document(words)
+              .collection('candidates')
+              .add(
+                Map<String, dynamic>.from({
+                  ...{'from': this.uuid},
+                  ...candidate.toMap()
+              }));
+        };
+        connection.addStream(_localStream);
+        connection.setRemoteDescription(offer);
+        connection.onDataChannel = (channnel) {
+          _dataChannel = channnel;
+          _dataChannel.onMessage = (message) {
+            updateDispalyString(message.text);
+          };
+        };
+
+        final answer = await connection.createAnswer({});
+        connection.setLocalDescription(answer);
+
+        store
+            .collection("rooms")
+            .document(words)
+            .collection("offers_and_answers")
+            .add({
+          'type': answer.type,
+          'from': this.uuid,
+          'to': uid,
+          'sdp': answer.sdp
+        });
+
+        _peerConnections[uid] = connection;
+
+        if (preparedCandidates[uid] != null) {
+          preparedCandidates[uid].forEach((can) {
+            connection.addCandidate(can);
+          });
+          preparedCandidates[uid].clear();
         }
       });
+    });
+  }
+
+  sendOffer(String uid, String roomWord) async {
+    final connection = await createNewConnection();
+    connection.onIceCandidate = (candidate) async {
+      connection.addCandidate(candidate);
+      await store
+          .collection("rooms")
+          .document(roomWord)
+          .collection('candidates')
+          .add(Map<String, dynamic>.from({
+            ...{'from': this.uuid},
+            ...candidate.toMap()
+          }));
+    };
+    connection.onAddStream = (stream) {
+      _remoteRenderer.srcObject = stream;
+    };
+    connection.addStream(_localStream);
+    _dataChannel =
+        await connection.createDataChannel('chat', RTCDataChannelInit());
+    _dataChannel.onMessage = (message) {
+      updateDispalyString(message.text);
+    };
+
+    final offer = await connection.createOffer({});
+    connection.setLocalDescription(offer);
+    _peerConnections[uid] = connection;
+
+    store
+        .collection("rooms")
+        .document(roomWord)
+        .collection("offers_and_answers")
+        .add({
+      'type': offer.type,
+      'from': this.uuid,
+      'to': uid,
+      'sdp': offer.sdp
     });
   }
 
@@ -175,14 +254,24 @@ class _MyHomePageState extends State<MyHomePage> {
     super.deactivate();
     _localRenderer.dispose();
     _remoteRenderer.dispose();
+    roomWordsEditingController.dispose();
+    _localStream.dispose();
   }
 
   makeCall() async {
     final store = new Firestore(app: app);
-    createOffer(store);
+    final words = RandomWordGenerator.generate5Words();
+
+    setState(() {
+      roomWords = words;
+    });
+
+    await joinRoom(words);
 
     store
         .collection("rooms")
+        .document(words)
+        .collection('offers_and_answers')
         .where("type", isEqualTo: "answer")
         .where("to", isEqualTo: this.uuid)
         .snapshots()
@@ -191,58 +280,21 @@ class _MyHomePageState extends State<MyHomePage> {
         return;
       }
 
-      updateDispalyString("apply answer");
+      data.documentChanges.forEach((change) {
+        final uid = change.document.data['from'];
+        final sdp = change.document['sdp'];
+        final type = change.document['type'];
 
-      final uid = data.documentChanges[0].document.data['from'];
-      final sdp = data.documentChanges[0].document.data['sdp'];
-      final type = data.documentChanges[0].document.data['type'];
+        _peerConnections[uid]
+            .setRemoteDescription(new RTCSessionDescription(sdp, type));
 
-      // すでに対応済みのConectionには対応しない
-      if (_peerConnections[uid] != null) {
-        return;
-      }
-      _peerConnections[uid] = _offeredConnection;
-
-      _offeredConnection
-          .setRemoteDescription(new RTCSessionDescription(sdp, type));
-
-      if (preparedCandidates[uid].length > 0) {
-        preparedCandidates[uid].forEach((c) async {
-          await _offeredConnection.addCandidate(c);
-        });
-      }
-    });
-  }
-
-  createOffer(Firestore store) async {
-    setState(() {
-      displayString = "createOffer";
-    });
-
-    final connection = await createNewConnection();
-    connection.onIceCandidate = (candidate) {
-      connection.addCandidate(candidate);
-      store.collection('candidates').add({
-        ...{'from': this.uuid},
-        ...candidate.toMap()
+        if (preparedCandidates[uid] != null) {
+          preparedCandidates[uid].forEach((c) async {
+            await _peerConnections[uid].addCandidate(c);
+          });
+        }
       });
-    };
-    connection.onAddStream = (stream) {
-      print('This is added Stream createOffer: ' + stream.id);
-      _remoteRenderer.srcObject = stream;
-    };
-    connection.addStream(_localStream);
-    _dataChannel =
-        await connection.createDataChannel('chat', RTCDataChannelInit());
-      _dataChannel.onMessage = (message) {
-        updateDispalyString(message.text);
-      };
-
-    final offer = await connection.createOffer({});
-    connection.setLocalDescription(offer);
-    _offeredConnection = connection;
-    store.collection("rooms").add(
-        {'type': offer.type, 'from': this.uuid, 'to': '', 'sdp': offer.sdp});
+    });
   }
 
   Future<RTCPeerConnection> createNewConnection() async {
@@ -282,20 +334,52 @@ class _MyHomePageState extends State<MyHomePage> {
               Expanded(child: RTCVideoView(_remoteRenderer)),
               TextField(
                 onChanged: (String newText) {
-                  print("テキストが変わりました");
-                  // updateDispalyString(newText);
                   if (_dataChannel != null) {
                     _dataChannel.send(RTCDataChannelMessage(newText));
                   }
                 },
               ),
+              Row(
+                children: <Widget>[
+                  FlatButton(
+                    child: Text("入室する"),
+                    onPressed: () {
+                      showDialog(
+                          context: context,
+                          builder: (context) {
+                            return AlertDialog(
+                              title: Text("あいことばを入力しよう"),
+                              content: TextField(
+                                controller: roomWordsEditingController,
+                              ),
+                              actions: <Widget>[
+                                FlatButton(
+                                  child: Text("この部屋に入る"),
+                                  onPressed: () async {
+                                    await joinRoom(roomWordsEditingController.text);
+                                    Navigator.pop(context);
+                                  },
+                                ),
+                                FlatButton(
+                                  child: Text("やっぱりやめる"),
+                                  onPressed: () {
+                                    Navigator.pop(context);
+                                  },
+                                )
+                              ],
+                            );
+                          });
+                    },
+                  ),
+                  FlatButton(
+                    child: Text("部屋をつくる"),
+                    onPressed: makeCall,
+                  ),
+                  Text("$roomWords")
+                ],
+              ),
             ],
           )),
-      floatingActionButton: FloatingActionButton(
-        onPressed: makeCall,
-        tooltip: 'Increment',
-        child: Icon(Icons.add),
-      ), // This trailing comma makes auto-formatting nicer for build methods.
     );
   }
 }
