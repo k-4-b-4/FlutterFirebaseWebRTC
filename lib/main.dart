@@ -29,25 +29,16 @@ class MyHomePage extends StatefulWidget {
 class _MyHomePageState extends State<MyHomePage> {
   Map<String, RTCPeerConnection> _peerConnections = {};
   RTCPeerConnection _offeredConnection = null;
+  RTCDataChannel _dataChannel = null;
   Map<String, List<RTCIceCandidate>> preparedCandidates = {};
   String displayString = '';
   String uuid = Uuid().v4();
-  bool isWait = false;
 
   MediaStream _localStream;
   final _localRenderer = new RTCVideoRenderer();
   final _remoteRenderer = new RTCVideoRenderer();
 
   final app = FirebaseApp.instance;
-
-  final Map<String, dynamic> offerSdpConstraints = {
-    "mandatory": {
-      "OfferToReceiveAudio": true,
-      "OfferToReceiveVideo": true,
-    },
-    "optional": [],
-  };
-
   @override
   initState() {
     super.initState();
@@ -63,7 +54,7 @@ class _MyHomePageState extends State<MyHomePage> {
 
   setupStream() async {
     final Map<String, dynamic> mediaConstraints = {
-      "audio": true,
+      "audio": false,
       "video": {
         "mandatory": {
           "minWidth":
@@ -115,6 +106,13 @@ class _MyHomePageState extends State<MyHomePage> {
           };
           connection.addStream(_localStream);
           connection.setRemoteDescription(offer);
+          connection.onDataChannel = (channnel) {
+            _dataChannel = channnel;
+            _dataChannel.onMessage = (message) {
+              updateDispalyString(message.text);
+            };
+          };
+
           final answer = await connection.createAnswer({});
           connection.setLocalDescription(answer);
 
@@ -138,42 +136,35 @@ class _MyHomePageState extends State<MyHomePage> {
 
     store.collection("candidates").snapshots().listen((data) async {
       final newCandidates = data.documentChanges
-          // .where((change) =>
-          //     change.document.data['from'] !=
-          //     this.uuid) // 自分自身のcandidate登録しないように
           .where((change) => change.type == DocumentChangeType.added);
-      if (newCandidates.length > 0) {
-        updateDispalyString("applying candidate");
-        print('ICECandidate情報が送られてきました');
-        newCandidates.forEach((dc) async {
-          final uid = dc.document.data['from']; // candidate対象のuuid
-          updateDispalyString("applying candidate $uid");
-          final candidate = dc.document.data['candidate'];
-          final sdpMid = dc.document.data['sdpMid'];
-          final sdpMlineIndex = dc.document.data['sdpMLineIndex'];
-          dc.document.data.keys.forEach((k) {
-            print(k);
-            print(dc.document.data[k]);
-          });
-          final iceCandidate =
-              RTCIceCandidate(candidate, sdpMid, sdpMlineIndex);
-
-          if (_peerConnections[uid] != null) {
-            print("peerConnection Founded");
-            await _peerConnections[uid].addCandidate(iceCandidate);
-          } else {
-            print("peerConnection did not founded");
-            if (preparedCandidates[uid] == null) {
-              preparedCandidates[uid] = [];
-            }
-            preparedCandidates[uid].add(iceCandidate);
-          }
-        });
+      if (newCandidates.isEmpty) {
+        return;
       }
+
+      // updateDispalyString("applying candidate");
+      print('ICECandidate情報が送られてきました');
+      newCandidates.forEach((dc) async {
+        final uid = dc.document.data['from']; // candidate対象のuuid
+        // updateDispalyString("applying candidate $uid");
+        final candidate = dc.document.data['candidate'];
+        final sdpMid = dc.document.data['sdpMid'];
+        final sdpMlineIndex = dc.document.data['sdpMLineIndex'];
+        final iceCandidate = RTCIceCandidate(candidate, sdpMid, sdpMlineIndex);
+
+        if (_peerConnections[uid] != null) {
+          await _peerConnections[uid].addCandidate(iceCandidate);
+        } else {
+          if (preparedCandidates[uid] == null) {
+            preparedCandidates[uid] = [];
+          }
+          preparedCandidates[uid].add(iceCandidate);
+        }
+      });
     });
   }
 
   updateDispalyString(String ds) {
+    print(ds);
     setState(() {
       displayString = ds;
     });
@@ -203,13 +194,14 @@ class _MyHomePageState extends State<MyHomePage> {
       updateDispalyString("apply answer");
 
       final uid = data.documentChanges[0].document.data['from'];
+      final sdp = data.documentChanges[0].document.data['sdp'];
+      final type = data.documentChanges[0].document.data['type'];
+
+      // すでに対応済みのConectionには対応しない
       if (_peerConnections[uid] != null) {
         return;
       }
       _peerConnections[uid] = _offeredConnection;
-
-      final sdp = data.documentChanges[0].document.data['sdp'];
-      final type = data.documentChanges[0].document.data['type'];
 
       _offeredConnection
           .setRemoteDescription(new RTCSessionDescription(sdp, type));
@@ -240,6 +232,12 @@ class _MyHomePageState extends State<MyHomePage> {
       _remoteRenderer.srcObject = stream;
     };
     connection.addStream(_localStream);
+    _dataChannel =
+        await connection.createDataChannel('chat', RTCDataChannelInit());
+    _dataChannel.onMessage = (message) {
+      updateDispalyString(message.text);
+    };
+
     final offer = await connection.createOffer({});
     connection.setLocalDescription(offer);
     _offeredConnection = connection;
@@ -271,39 +269,28 @@ class _MyHomePageState extends State<MyHomePage> {
 
   @override
   Widget build(BuildContext context) {
-    var widgets = <Widget>[
-      Text(
-        '$displayString',
-        style: Theme.of(context).textTheme.display1,
-      ),
-      new Expanded(
-        child: new RTCVideoView(_localRenderer),
-      ),
-      new Expanded(
-        child: new RTCVideoView(_remoteRenderer),
-      )
-    ];
-
     return Scaffold(
       appBar: AppBar(
         title: Text(widget.title),
       ),
-      body: new OrientationBuilder(
-        builder: (context, orientation) {
-          return new Center(
-            child: new Container(
-              decoration: new BoxDecoration(color: Colors.black54),
-              child: orientation == Orientation.portrait
-                  ? new Column(
-                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                      children: widgets)
-                  : new Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                      children: widgets),
-            ),
-          );
-        },
-      ),
+      body: new Container(
+          decoration: BoxDecoration(color: Colors.black54),
+          child: Column(
+            children: <Widget>[
+              Text('$displayString'),
+              Expanded(child: RTCVideoView(_localRenderer)),
+              Expanded(child: RTCVideoView(_remoteRenderer)),
+              TextField(
+                onChanged: (String newText) {
+                  print("テキストが変わりました");
+                  // updateDispalyString(newText);
+                  if (_dataChannel != null) {
+                    _dataChannel.send(RTCDataChannelMessage(newText));
+                  }
+                },
+              ),
+            ],
+          )),
       floatingActionButton: FloatingActionButton(
         onPressed: makeCall,
         tooltip: 'Increment',

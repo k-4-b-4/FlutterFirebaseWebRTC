@@ -17,48 +17,28 @@ class RoomBloc {
   // すでにOffer/AnswerとしてやりとりしてConnectionをはっている場合
   var connectedUdids = List<String>();
 
-  Firestore cloudStoreConnection;
+  Firestore store;
 
-  get roomRef => cloudStoreConnection.collection('rooms').reference();
-
-  Map<String, dynamic> configuration = {
-    "iceServers": [
-      {"url": "stun:stun.l.google.com:19302"},
-    ]
-  };
-
-  final Map<String, dynamic> offerSdpConstraints = {
-    "mandatory": {
-      "OfferToReceiveAudio": true,
-      "OfferToReceiveVideo": false,
-    },
-    "optional": [],
-  };
-
-  final Map<String, dynamic> loopbackConstraints = {
-    "mandatory": {},
-    "optional": [
-      {"DtlsSrtpKeyAgreement": true},
-    ],
-  };
+  get roomRef => store.collection('rooms').reference();
 
   RoomBloc() {
-    cloudStoreConnection = Firestore(app: FirebaseApp.instance);
-    createFirstPeerConnection();
-    startSignaling();
+    store = Firestore(app: FirebaseApp.instance);
   }
 
   // 最初のコネクション情報を生成する
-  void createFirstPeerConnection() async {
-    final peerConnection =
-        await createPeerConnection(configuration, loopbackConstraints);
+  Future<RTCPeerConnection> createNewConnection() async {
+    Map<String, dynamic> configuration = {
+      "iceServers": [
+        {"url": "stun:stun.l.google.com:19302"},
+      ]
+    };
 
-    var peerConnections = List<RTCPeerConnection>(10);
-    peerConnections[0] = peerConnection;
-  }
-
-  @pragma('Signaling: Start SignalingObserving')
-  void startSignaling() {
-//    cloudStoreConnection.collection('rooms')
+    final Map<String, dynamic> loopbackConstraints = {
+      "mandatory": {},
+      "optional": [
+        {"DtlsSrtpKeyAgreement": true},
+      ],
+    };
+    return await createPeerConnection(configuration, loopbackConstraints);
   }
 }
