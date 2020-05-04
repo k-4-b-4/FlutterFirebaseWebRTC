@@ -234,9 +234,9 @@ class _MyHomePageState extends State<MyHomePage> {
     connection.addStream(_localStream);
     _dataChannel =
         await connection.createDataChannel('chat', RTCDataChannelInit());
-    _dataChannel.onMessage = (message) {
-      updateDispalyString(message.text);
-    };
+      _dataChannel.onMessage = (message) {
+        updateDispalyString(message.text);
+      };
 
     final offer = await connection.createOffer({});
     connection.setLocalDescription(offer);
