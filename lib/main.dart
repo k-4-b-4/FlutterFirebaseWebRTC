@@ -61,8 +61,8 @@ class _MyHomePageState extends State<MyHomePage> {
 
   initRenderers() async {
     await _localRenderer.initialize(); // 自分のインカメラ
-    await _remoteRenderer.initialize(); // 相手のカメラ
-    await _remoteRenderer2.initialize();
+    await _remoteRenderer.initialize(); // 1人目のカメラ
+    await _remoteRenderer2.initialize(); // 2人目のカメラ
   }
 
   setupMediaStream() async {
@@ -110,6 +110,17 @@ class _MyHomePageState extends State<MyHomePage> {
           .forEach((dc) {
         sendOffer(dc.document.data['uid'], words);
       });
+
+      data.documentChanges
+          .where((change) => change.document.data['uid'] != this.uuid)
+          .where((change) => change.type == DocumentChangeType.removed)
+          .forEach((dc) async {
+        final uid = dc.document.data['uid'];
+        await _peerConnections[uid].dispose();
+        await _dataChannels[uid].close();
+        _peerConnections.remove(uid);
+        _dataChannels.remove(uid);
+      });
     });
 
     store
@@ -123,8 +134,7 @@ class _MyHomePageState extends State<MyHomePage> {
           .where((change) => change.type == DocumentChangeType.added)
           .forEach((dc) async {
         print('ICECandidate情報が送られてきました');
-        final uid = dc.document.data['from']; // candidate対象のuuid
-        updateDispalyString("applying candidate $uid");
+        final uid = dc.document.data['from'];
         final candidate = dc.document.data['candidate'];
         final sdpMid = dc.document.data['sdpMid'];
         final sdpMlineIndex = dc.document.data['sdpMLineIndex'];
@@ -140,34 +150,33 @@ class _MyHomePageState extends State<MyHomePage> {
         }
       });
 
-
-    store
-        .collection("rooms")
-        .document(words)
-        .collection('offers_and_answers')
-        .where("type", isEqualTo: "answer")
-        .where("to", isEqualTo: this.uuid)
-        .snapshots()
-        .listen((data) async {
-      if (data.documentChanges.length == 0) {
-        return;
-      }
-
-      data.documentChanges.forEach((change) {
-        final uid = change.document.data['from'];
-        final sdp = change.document['sdp'];
-        final type = change.document['type'];
-
-        _peerConnections[uid]
-            .setRemoteDescription(new RTCSessionDescription(sdp, type));
-
-        if (preparedCandidates[uid] != null) {
-          preparedCandidates[uid].forEach((c) async {
-            await _peerConnections[uid].addCandidate(c);
-          });
+      store
+          .collection("rooms")
+          .document(words)
+          .collection('offers_and_answers')
+          .where("type", isEqualTo: "answer")
+          .where("to", isEqualTo: this.uuid)
+          .snapshots()
+          .listen((data) async {
+        if (data.documentChanges.length == 0) {
+          return;
         }
+
+        data.documentChanges.forEach((change) {
+          final uid = change.document.data['from'];
+          final sdp = change.document['sdp'];
+          final type = change.document['type'];
+
+          _peerConnections[uid]
+              .setRemoteDescription(new RTCSessionDescription(sdp, type));
+
+          if (preparedCandidates[uid] != null) {
+            preparedCandidates[uid].forEach((c) async {
+              await _peerConnections[uid].addCandidate(c);
+            });
+          }
+        });
       });
-    });
     });
 
     store
@@ -187,7 +196,13 @@ class _MyHomePageState extends State<MyHomePage> {
         final offer = new RTCSessionDescription(
             dc.document.data['sdp'], dc.document.data['type']);
         final connection = await createNewConnection();
-
+        connection.onDataChannel = (dataChannel) {
+          _dataChannels[uid] = dataChannel;
+          _dataChannels[uid].onMessage = (message) {
+            final text = message.text;
+            updateDispalyString('$text from $uid');
+          };
+        };
         connection.onAddStream = applyRemoteStream;
 
         connection.onIceCandidate = (candidate) {
@@ -206,12 +221,6 @@ class _MyHomePageState extends State<MyHomePage> {
         };
         connection.addStream(_localStream);
         connection.setRemoteDescription(offer);
-        connection.onDataChannel = (channnel) {
-          _dataChannels[uid] = channnel;
-          _dataChannels[uid].onMessage = (message) {
-            updateDispalyString('$message.text from $uid');
-          };
-        };
 
         final answer = await connection.createAnswer({});
         connection.setLocalDescription(answer);
@@ -255,6 +264,15 @@ class _MyHomePageState extends State<MyHomePage> {
 
   sendOffer(String uid, String roomWord) async {
     final connection = await createNewConnection();
+    connection.addStream(_localStream);
+    final dataChannel =
+        await connection.createDataChannel('chat', RTCDataChannelInit());
+    _dataChannels[uid] = dataChannel;
+    _dataChannels[uid].onMessage = (message) {
+      final text = message.text;
+      updateDispalyString('$text from $uid');
+    };
+
     connection.onIceCandidate = (candidate) async {
       connection.addCandidate(candidate);
       await store
@@ -269,16 +287,8 @@ class _MyHomePageState extends State<MyHomePage> {
             ...candidate.toMap()
           }));
     };
-    connection.onAddStream = applyRemoteStream;
 
-    connection.addStream(_localStream);
-    await connection.createDataChannel('chat', RTCDataChannelInit());
-    connection.onDataChannel = (channel) {
-      _dataChannels[uid] = channel;
-      _dataChannels[uid].onMessage = (message) {
-        updateDispalyString(message.text);
-      };
-    };
+    connection.onAddStream = applyRemoteStream;
 
     final offer = await connection.createOffer({});
     connection.setLocalDescription(offer);
@@ -304,12 +314,17 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   @override
-  deactivate() {
+  deactivate() async {
     super.deactivate();
     _localRenderer.dispose();
     _remoteRenderer.dispose();
     roomWordsEditingController.dispose();
     _localStream.dispose();
+    await store
+        .collection("rooms")
+        .document(roomWords)
+        .collection("users")
+        .delete(this.uuid);
   }
 
   makeCall() async {
@@ -406,4 +421,9 @@ class _MyHomePageState extends State<MyHomePage> {
           )),
     );
   }
+
+  // TODO Wordのバリデーション
+  // bool validateRoomWord(String word) {
+  //   store.collection("rooms").document(word)
+  // }
 }
