@@ -371,6 +371,7 @@ class _MyHomePageState extends State<MyHomePage> {
               TextField(
                 onChanged: (String newText) {
                   _dataChannels.values.forEach((c) {
+                    // NOTE: 特定の人にのみ送る挙動はuidで絞り込みすればできる
                     c.send(RTCDataChannelMessage(newText));
                   });
                 },
