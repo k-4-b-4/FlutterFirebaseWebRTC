@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -32,6 +34,9 @@ class _MyHomePageState extends State<MyHomePage> {
   Map<String, RTCPeerConnection> _peerConnections = {};
   Map<String, RTCDataChannel> _dataChannels = {};
   Map<String, List<RTCIceCandidate>> preparedCandidates = {};
+  Map<String, RTCVideoRenderer> renderer = {};
+  List<RTCVideoViewV2> videoViews = [];
+
   String displayString = '';
   String roomWords = '';
   String uuid = Uuid().v4();
@@ -71,8 +76,8 @@ class _MyHomePageState extends State<MyHomePage> {
       "video": {
         "mandatory": {
           "minWidth":
-              '1280', // Provide your own width, height and frame rate here
-          "minHeight": '720',
+              '640', // Provide your own width, height and frame rate here
+          "minHeight": '360',
           "minFrameRate": '30',
         },
         "facingMode": "user",
@@ -109,6 +114,7 @@ class _MyHomePageState extends State<MyHomePage> {
               .isAfter(joinedAt))
           .forEach((dc) {
         sendOffer(dc.document.data['uid'], words);
+        // create Renderer
       });
 
       data.documentChanges
@@ -318,8 +324,17 @@ class _MyHomePageState extends State<MyHomePage> {
     super.deactivate();
     _localRenderer.dispose();
     _remoteRenderer.dispose();
+    await store
+        .collection("rooms")
+        .document(roomWords)
+        .collection("users")
+        .delete(this.uuid);
     roomWordsEditingController.dispose();
     _localStream.dispose();
+  }
+
+  leaveRoom() async {
+    _remoteRenderer.dispose();
     await store
         .collection("rooms")
         .document(roomWords)
@@ -358,16 +373,24 @@ class _MyHomePageState extends State<MyHomePage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(widget.title),
+        title: Text("簡単お手軽ビデオチャット"),
       ),
-      body: new Container(
+      body: Container(
           decoration: BoxDecoration(color: Colors.black54),
           child: Column(
             children: <Widget>[
               Text('$displayString'),
-              Expanded(child: RTCVideoView(_localRenderer)),
-              Expanded(child: RTCVideoView(_remoteRenderer)),
-              Expanded(child: RTCVideoView(_remoteRenderer2)),
+              Container(
+                height: 160,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: <Widget>[
+                    RTCVideoViewV2(_localRenderer),
+                    RTCVideoViewV2(_remoteRenderer),
+                    RTCVideoViewV2(_remoteRenderer2)
+                  ],
+                ),
+              ),
               TextField(
                 onChanged: (String newText) {
                   _dataChannels.values.forEach((c) {
@@ -414,8 +437,6 @@ class _MyHomePageState extends State<MyHomePage> {
                     onPressed: makeCall,
                   ),
                   Text(" 部屋鍵: $roomWords"),
-                  Text(" $_remoteUsed"),
-                  Text(" $_remote2Used"),
                 ],
               ),
             ],
@@ -427,4 +448,95 @@ class _MyHomePageState extends State<MyHomePage> {
   // bool validateRoomWord(String word) {
   //   store.collection("rooms").document(word)
   // }
+}
+
+class RTCVideoViewV2 extends StatefulWidget {
+  final RTCVideoRenderer _renderer;
+  RTCVideoViewV2(this._renderer, {Key key}) : super(key: key);
+  @override
+  _RTCVideoViewV2State createState() => new _RTCVideoViewV2State();
+}
+
+class _RTCVideoViewV2State extends State<RTCVideoViewV2> {
+  double _aspectRatio;
+  RTCVideoViewObjectFit _objectFit;
+  bool _mirror;
+  int _textureId;
+
+  @override
+  void initState() {
+    super.initState();
+    _setCallbacks();
+    _aspectRatio = widget._renderer.aspectRatio;
+    _mirror = widget._renderer.mirror;
+    _objectFit = widget._renderer.objectFit;
+  }
+
+  @override
+  void dispose() {
+    super.dispose();
+    widget._renderer.onStateChanged = null;
+  }
+
+  void _setCallbacks() {
+    widget._renderer.onStateChanged = () {
+      setState(() {
+        _aspectRatio = widget._renderer.aspectRatio;
+        _mirror = widget._renderer.mirror;
+        _objectFit = widget._renderer.objectFit;
+        _textureId = widget._renderer.textureId;
+      });
+    };
+  }
+
+  Widget _buildVideoView(BoxConstraints constraints) {
+    return Container(
+      decoration: BoxDecoration(
+          border: Border.all(color: Colors.black),
+          borderRadius: BorderRadius.circular(10)),
+      width: constraints.maxHeight * 0.56,
+      height: constraints.maxHeight,
+      child: ClipRRect(
+        child: _textureId != null
+            ? Texture(textureId: _textureId)
+            : Container(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: FractionalOffset.topLeft,
+                    end: FractionalOffset.bottomRight,
+                    colors: [
+                      const Color(0xffe4a972).withOpacity(0.6),
+                      const Color(0xff9941d8).withOpacity(0.6),
+                    ],
+                    stops: const [
+                      0.0,
+                      1.0,
+                    ],
+                  ),
+                ),
+              ),
+        borderRadius: BorderRadius.circular(10),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return new LayoutBuilder(
+        builder: (BuildContext context, BoxConstraints constraints) {
+      return Stack(
+        children: <Widget>[
+          _buildVideoView(constraints),
+          Positioned(
+            left: 20,
+            bottom: 10,
+            child: Text(
+              _textureId != null ? "接続済み" : "未接続",
+              style: TextStyle(color: Colors.white),
+            ),
+          )
+        ],
+      );
+    });
+  }
 }
