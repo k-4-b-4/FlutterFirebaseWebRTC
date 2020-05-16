@@ -1,12 +1,8 @@
-import 'dart:math';
-
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:flutter_firebase_webrtc/app/utils/RandomWordGenerator.dart';
 import 'package:flutter_webrtc/webrtc.dart';
 import 'package:uuid/uuid.dart';
-import 'package:random_string/random_string.dart';
 
 void main() => runApp(MyApp());
 
@@ -16,15 +12,177 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Flutter Demo',
-      home: MyHomePage(title: 'Flutter Demo Home Page'),
+      home: LaunchPage(),
+    );
+  }
+}
+
+class LaunchPage extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+        body: Container(
+      width: double.infinity,
+      decoration: BoxDecoration(
+          gradient: LinearGradient(
+              begin: Alignment.bottomCenter,
+              end: Alignment.topCenter,
+              colors: [Color.fromARGB(255, 186, 0, 188), Colors.black])),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        children: <Widget>[
+          RaisedButton(
+            color: Color.fromARGB(255, 66, 255, 99),
+            child: Padding(
+              padding: const EdgeInsets.only(right: 8, left: 8),
+              child: Text(
+                "ヘヤヲツクル",
+                style: TextStyle(
+                    color: Colors.white, fontFamily: 'カタカナボーイ', fontSize: 24),
+              ),
+            ),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (context) {
+                    return InputKeywordPage(
+                      isCreate: true,
+                    );
+                  },
+                ),
+              );
+            },
+          ),
+          RaisedButton(
+            color: Color.fromARGB(255, 66, 255, 99),
+            child: Padding(
+              padding: const EdgeInsets.only(right: 8, left: 8),
+              child: Text(
+                "ヘヤニハイル",
+                style: TextStyle(
+                    color: Colors.white, fontFamily: 'カタカナボーイ', fontSize: 24),
+              ),
+            ),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (context) {
+                    return InputKeywordPage(
+                      isCreate: false,
+                    );
+                  },
+                ),
+              );
+            },
+          )
+        ],
+      ),
+    ));
+  }
+}
+
+class InputKeywordPage extends StatefulWidget {
+  InputKeywordPage({Key key, this.isCreate}) : super(key: key);
+
+  final bool isCreate;
+
+  _InputkeywordPageState createState() => _InputkeywordPageState();
+}
+
+class _InputkeywordPageState extends State<InputKeywordPage> {
+  final roomWordsEditingController = TextEditingController();
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Container(
+        width: double.infinity,
+        decoration: BoxDecoration(
+            gradient: LinearGradient(
+                begin: Alignment.bottomCenter,
+                end: Alignment.topCenter,
+                colors: [Color.fromARGB(255, 186, 0, 188), Colors.black])),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: <Widget>[
+            Text("アイコトバヲニュウリョクシヨウ",
+                style: TextStyle(
+                  color: Colors.white,
+                  fontFamily: 'カタカナボーイ',
+                  fontSize: 24,
+                )),
+            Padding(
+              padding: const EdgeInsets.only(right: 40, left: 40),
+              child: Container(
+                decoration: BoxDecoration(
+                    color: Colors.black,
+                    borderRadius: BorderRadius.circular(25),
+                    border: Border.all(width: 10, color: Colors.white)),
+                child: Padding(
+                  padding:
+                      const EdgeInsets.only(right: 10, left: 10, bottom: 4),
+                  child: TextField(
+                    maxLength: 5,
+                    controller: roomWordsEditingController,
+                    style: TextStyle(color: Colors.white),
+                    keyboardType: TextInputType.text,
+                    decoration: InputDecoration(
+                      enabledBorder: UnderlineInputBorder(
+                        borderSide: BorderSide(
+                            color: Color.fromARGB(255, 66, 255, 99), width: 2),
+                      ),
+                      focusedBorder: UnderlineInputBorder(
+                        borderSide: BorderSide(
+                            color: Color.fromARGB(255, 66, 255, 99), width: 2),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            RaisedButton(
+              color: Color.fromARGB(255, 66, 255, 99),
+              child: Padding(
+                padding: const EdgeInsets.only(right: 8, left: 8),
+                child: Text(
+                  widget.isCreate ? "ヘヤヲツクル" : "ヘヤニハイル",
+                  style: TextStyle(
+                      color: Colors.white, fontFamily: 'カタカナボーイ', fontSize: 24),
+                ),
+              ),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10)),
+              onPressed: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (context) {
+                      return MyHomePage(
+                        roomword: roomWordsEditingController.text,
+                        isCreated: widget.isCreate,
+                      );
+                    },
+                  ),
+                );
+              },
+            )
+          ],
+        ),
+      ),
     );
   }
 }
 
 class MyHomePage extends StatefulWidget {
-  MyHomePage({Key key, this.title}) : super(key: key);
+  MyHomePage({Key key, this.roomword, this.isCreated}) : super(key: key);
 
-  final String title;
+  final String roomword;
+  final bool isCreated;
 
   @override
   _MyHomePageState createState() => _MyHomePageState();
@@ -49,7 +207,6 @@ class _MyHomePageState extends State<MyHomePage> {
   bool _remoteUsed = false;
   final _remoteRenderer2 = new RTCVideoRenderer();
   bool _remote2Used = false;
-  final roomWordsEditingController = TextEditingController();
 
   static final app = FirebaseApp.instance;
   final _store = Firestore(app: app);
@@ -62,6 +219,13 @@ class _MyHomePageState extends State<MyHomePage> {
     super.initState();
     initRenderers();
     setupMediaStream();
+    this.roomWords = widget.roomword;
+
+    if (widget.isCreated) {
+      this.makeCall();
+    } else {
+      joinRoom(this.roomWords);
+    }
   }
 
   initRenderers() async {
@@ -329,7 +493,6 @@ class _MyHomePageState extends State<MyHomePage> {
         .document(roomWords)
         .collection("users")
         .delete(this.uuid);
-    roomWordsEditingController.dispose();
     _localStream.dispose();
   }
 
@@ -343,8 +506,8 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   makeCall() async {
-    final words = RandomWordGenerator.generate5Words();
-    await joinRoom(words);
+    // final words = RandomWordGenerator.generate5Words();
+    await joinRoom(this.roomWords);
   }
 
   Future<RTCPeerConnection> createNewConnection() async {
@@ -372,76 +535,123 @@ class _MyHomePageState extends State<MyHomePage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: Text("簡単お手軽ビデオチャット"),
-      ),
-      body: Container(
-          decoration: BoxDecoration(color: Colors.black54),
-          child: Column(
-            children: <Widget>[
-              Text('$displayString'),
-              Container(
-                height: 160,
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                  children: <Widget>[
-                    RTCVideoViewV2(_localRenderer),
-                    RTCVideoViewV2(_remoteRenderer),
-                    RTCVideoViewV2(_remoteRenderer2)
-                  ],
+        body: Container(
+            decoration: BoxDecoration(
+                gradient: LinearGradient(
+                    begin: Alignment.bottomCenter,
+                    end: Alignment.topCenter,
+                    colors: [Color.fromARGB(255, 186, 0, 188), Colors.black])),
+            child: Stack(
+              fit: StackFit.expand,
+              children: <Widget>[
+                Container(
+                  width: double.infinity,
+                  child: Padding(
+                    padding: const EdgeInsets.only(
+                        right: 20, left: 20, top: 60, bottom: 100),
+                    child: Container(
+                      child: RTCVideoViewV2(_remoteRenderer),
+                      decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(25),
+                          border: Border.all(color: Colors.white, width: 10)),
+                    ),
+                  ),
                 ),
-              ),
-              TextField(
-                onChanged: (String newText) {
-                  _dataChannels.values.forEach((c) {
-                    // NOTE: 特定の人にのみ送る挙動はuidで絞り込みすればできる
-                    c.send(RTCDataChannelMessage(newText));
-                  });
-                },
-              ),
-              Row(
-                children: <Widget>[
-                  FlatButton(
-                    child: Text("入室する"),
-                    onPressed: () {
-                      showDialog(
-                          context: context,
-                          builder: (context) {
-                            return AlertDialog(
-                              title: Text("あいことばを入力しよう"),
-                              content: TextField(
-                                controller: roomWordsEditingController,
-                              ),
-                              actions: <Widget>[
-                                FlatButton(
-                                  child: Text("この部屋に入る"),
-                                  onPressed: () async {
-                                    Navigator.pop(context);
-                                    await joinRoom(
-                                        roomWordsEditingController.text);
-                                  },
+                Container(
+                    child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: <Widget>[
+                    Container(
+                      child: Padding(
+                        padding: const EdgeInsets.only(top: 80),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: <Widget>[
+                            Container(
+                              child: Padding(
+                                padding: const EdgeInsets.all(8.0),
+                                child: Text(
+                                  "通話を終了",
+                                  style: TextStyle(color: Colors.white),
                                 ),
-                                FlatButton(
-                                  child: Text("やっぱりやめる"),
-                                  onPressed: () {
-                                    Navigator.pop(context);
-                                  },
-                                )
-                              ],
-                            );
-                          });
-                    },
-                  ),
-                  FlatButton(
-                    child: Text("部屋をつくる"),
-                    onPressed: makeCall,
-                  ),
-                  Text(" 部屋鍵: $roomWords"),
-                ],
-              ),
-            ],
-          )),
-    );
+                              ),
+                              decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(10),
+                                  color: Colors.red),
+                            ),
+                            Container(
+                              child: Padding(
+                                padding: const EdgeInsets.all(8.0),
+                                child: Text(
+                                  widget.roomword,
+                                  style: TextStyle(color: Colors.white),
+                                ),
+                              ),
+                              decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(10),
+                                  color: Colors.red),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    Container(
+                      height: 170,
+                      child: Padding(
+                        padding: const EdgeInsets.all(10.0),
+                        child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: <Widget>[
+                              MaterialButton(
+                                onPressed: () {
+                                  _dataChannels.values.forEach((c) {
+                                    //  NOTE: 特定の人にのみ送る挙動はuidで絞り込みすればできる
+                                    c.send(RTCDataChannelMessage(
+                                        "emoji_action_like"));
+                                  });
+                                },
+                                color: Colors.blue,
+                                textColor: Colors.white,
+                                child: Text(
+                                  "👍",
+                                  style: TextStyle(fontSize: 32),
+                                ),
+                                padding: EdgeInsets.all(10),
+                                shape: CircleBorder(),
+                              ),
+                              MaterialButton(
+                                onPressed: () {
+                                  _dataChannels.values.forEach((c) {
+                                    //  NOTE: 特定の人にのみ送る挙動はuidで絞り込みすればできる
+                                    c.send(RTCDataChannelMessage(
+                                        "emoji_action_tada"));
+                                  });
+                                },
+                                color: Colors.blue,
+                                textColor: Colors.white,
+                                child: Text(
+                                  "🎉",
+                                  style: TextStyle(fontSize: 32),
+                                ),
+                                padding: EdgeInsets.all(10),
+                                shape: CircleBorder(),
+                              ),
+                              Container(
+                                decoration: BoxDecoration(
+                                    borderRadius: BorderRadius.circular(25),
+                                    border: Border.all(
+                                        color: Colors.white, width: 10)),
+                                child: RTCVideoViewV2(_localRenderer),
+                              ),
+                            ]),
+                      ),
+                    )
+                  ],
+                ))
+              ],
+            )));
   }
 
   // TODO Wordのバリデーション
@@ -459,8 +669,7 @@ class RTCVideoViewV2 extends StatefulWidget {
 
 class _RTCVideoViewV2State extends State<RTCVideoViewV2> {
   double _aspectRatio;
-  RTCVideoViewObjectFit _objectFit;
-  bool _mirror;
+//  RTCVideoViewObjectFit _objectFit;
   int _textureId;
 
   @override
@@ -468,8 +677,7 @@ class _RTCVideoViewV2State extends State<RTCVideoViewV2> {
     super.initState();
     _setCallbacks();
     _aspectRatio = widget._renderer.aspectRatio;
-    _mirror = widget._renderer.mirror;
-    _objectFit = widget._renderer.objectFit;
+//    _objectFit = widget._renderer.objectFit;
   }
 
   @override
@@ -482,8 +690,7 @@ class _RTCVideoViewV2State extends State<RTCVideoViewV2> {
     widget._renderer.onStateChanged = () {
       setState(() {
         _aspectRatio = widget._renderer.aspectRatio;
-        _mirror = widget._renderer.mirror;
-        _objectFit = widget._renderer.objectFit;
+        //       _objectFit = widget._renderer.objectFit;
         _textureId = widget._renderer.textureId;
       });
     };
@@ -491,10 +698,8 @@ class _RTCVideoViewV2State extends State<RTCVideoViewV2> {
 
   Widget _buildVideoView(BoxConstraints constraints) {
     return Container(
-      decoration: BoxDecoration(
-          border: Border.all(color: Colors.black),
-          borderRadius: BorderRadius.circular(10)),
-      width: constraints.maxHeight * 0.56,
+      decoration: BoxDecoration(borderRadius: BorderRadius.circular(10)),
+      width: constraints.maxHeight * _aspectRatio,
       height: constraints.maxHeight,
       child: ClipRRect(
         child: _textureId != null
